@@ -1,0 +1,14 @@
+langgraph
+langchain-openai
+langchain-core
+openai
+rapidfuzz
+sqlalchemy
+pymysql[rsa]
+cryptography
+streamlit
+pandas
+openpyxl
+pydantic
+python-dotenv
+pytest

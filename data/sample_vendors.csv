@@ -1,0 +1,33 @@
+vendor_name,address,city,state,zip,country,tax_id,source
+Acme Corporation,123 Main St,New York,NY,10001,US,12-3456789,system_a
+ACME Corp,123 Main Street,New York,NY,10001,US,12-3456789,system_b
+Acme Corp.,123 Main St.,New York,New York,10001,US,123456789,system_c
+Global Tech Solutions,456 Oak Ave,San Francisco,CA,94102,US,98-7654321,system_a
+Global Technology Solutions,456 Oak Avenue,San Francisco,California,94102,US,98-7654321,system_b
+Pinnacle Services LLC,789 Pine Blvd,Chicago,IL,60601,US,55-1234567,system_a
+Pinnacle Services,789 Pine Boulevard,Chicago,Illinois,60601,US,55-1234567,system_b
+Bright Star Industries,321 Elm Dr,Austin,TX,73301,US,44-9876543,system_a
+BrightStar Industries Inc,321 Elm Drive,Austin,Texas,73301,US,44-9876543,system_b
+Bright Star Ind.,321 Elm Dr,Austin,TX,73301,US,449876543,system_c
+Summit Partners Group,654 Maple Ln,Seattle,WA,98101,US,33-5678901,system_a
+Summit Partners,654 Maple Lane,Seattle,Washington,98101,US,33-5678901,system_b
+Nexus Consulting LLC,987 Cedar Rd,Boston,MA,02101,US,22-3456789,system_a
+Nexus Consulting,987 Cedar Road,Boston,Massachusetts,02101,US,22-3456789,system_b
+Pacific Rim Trading Co,111 Harbor Blvd,Los Angeles,CA,90001,US,77-8901234,system_a
+Pacific Rim Trading Company,111 Harbor Boulevard,Los Angeles,California,90001,US,77-8901234,system_b
+Midwest Supply Chain,222 Industrial Pkwy,Detroit,MI,48201,US,66-5432109,system_a
+Midwest Supply Chain Inc,222 Industrial Parkway,Detroit,Michigan,48201,US,66-5432109,system_b
+Delta Engineering Corp,333 River Rd,Portland,OR,97201,US,88-1122334,system_a
+Delta Engineering Corporation,333 River Road,Portland,Oregon,97201,US,88-1122334,system_b
+Horizon Healthcare Ltd,444 Medical Dr,Houston,TX,77001,US,11-9988776,system_a
+Horizon Health Care Limited,444 Medical Drive,Houston,Texas,77001,US,11-9988776,system_b
+Vertex Financial Services,555 Wall St,New York,NY,10005,US,99-4455667,system_a
+Vertex Financial Svcs,555 Wall Street,New York,New York,10005,US,99-4455667,system_b
+Alpine Construction Co,666 Mountain Ave,Denver,CO,80201,US,44-3322110,system_a
+Alpine Construction Company,666 Mountain Avenue,Denver,Colorado,80201,US,44-3322110,system_b
+Evergreen Logistics,777 Forest Ln,Minneapolis,MN,55401,US,33-6677889,system_a
+Unique Vendor Alpha,888 Sunset Blvd,Miami,FL,33101,US,55-0011223,system_a
+Unique Vendor Beta,999 Sunrise Ave,Phoenix,AZ,85001,US,66-4455667,system_a
+Unique Vendor Gamma,100 Ocean Dr,San Diego,CA,92101,US,,system_a
+Johnson & Smith Associates,200 Park Ave,Atlanta,GA,30301,US,77-1234000,system_a
+Johnson and Smith Assoc,200 Park Avenue,Atlanta,Georgia,30301,US,77-1234000,system_b
