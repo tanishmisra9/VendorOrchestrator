@@ -1,11 +1,18 @@
 import json
 import logging
+import os
 from typing import Any, Optional
 
 from db.connection import session_scope
 from db.models import AuditLog, AnalystOverride as AnalystOverrideModel
 
 logger = logging.getLogger(__name__)
+
+STRICT_AUDIT = os.getenv("STRICT_AUDIT", "true").lower() in ("true", "1", "yes")
+
+
+class AuditWriteError(RuntimeError):
+    """Raised when an audit log write fails in strict mode."""
 
 
 def log_agent_action(
@@ -25,8 +32,12 @@ def log_agent_action(
                 confidence=confidence,
             )
             session.add(entry)
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to write audit log for %s", agent_name)
+        if STRICT_AUDIT:
+            raise AuditWriteError(
+                f"Audit log write failed for {agent_name}/{action}"
+            ) from exc
 
 
 def log_analyst_override(
@@ -46,5 +57,9 @@ def log_analyst_override(
                 analyst_name=analyst_name,
             )
             session.add(entry)
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to write analyst override for vendor %s", vendor_id)
+        if STRICT_AUDIT:
+            raise AuditWriteError(
+                f"Analyst override write failed for vendor {vendor_id}"
+            ) from exc

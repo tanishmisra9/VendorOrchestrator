@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -13,6 +13,10 @@ from sqlalchemy import (
     Index,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -36,8 +40,8 @@ class VendorMaster(Base):
     )
     cluster_id = Column(Integer, index=True)
     source = Column(String(100))
-    created_at = Column(TIMESTAMP, default=datetime.utcnow)
-    updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(TIMESTAMP, default=_utcnow)
+    updated_at = Column(TIMESTAMP, default=_utcnow, onupdate=_utcnow)
 
     audit_logs = relationship("AuditLog", back_populates="vendor")
     overrides = relationship("AnalystOverride", back_populates="vendor")
@@ -69,7 +73,7 @@ class AuditLog(Base):
     vendor_id = Column(Integer, ForeignKey("vendor_master.id", ondelete="SET NULL"))
     details_json = Column(JSON)
     confidence = Column(Float)
-    timestamp = Column(TIMESTAMP, default=datetime.utcnow)
+    timestamp = Column(TIMESTAMP, default=_utcnow)
 
     vendor = relationship("VendorMaster", back_populates="audit_logs")
 
@@ -85,6 +89,6 @@ class AnalystOverride(Base):
     override_action = Column(String(100), nullable=False)
     reason = Column(Text)
     analyst_name = Column(String(100))
-    timestamp = Column(TIMESTAMP, default=datetime.utcnow)
+    timestamp = Column(TIMESTAMP, default=_utcnow)
 
     vendor = relationship("VendorMaster", back_populates="overrides")

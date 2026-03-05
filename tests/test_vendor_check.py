@@ -25,12 +25,23 @@ def _make_agent(mock_llm_response=None) -> VendorCheckAgent:
     return VendorCheckAgent(ctx, openai_client=mock_client)
 
 
+def _make_session_mock(vendors):
+    """Create a session mock where all query chains return the given vendor list."""
+    session_mock = MagicMock()
+    query_mock = MagicMock()
+    filter_mock = MagicMock()
+    filter_mock.limit.return_value.all.return_value = vendors
+    filter_mock.all.return_value = vendors
+    query_mock.filter.return_value = filter_mock
+    session_mock.query.return_value = query_mock
+    return session_mock
+
+
 class TestVendorCheckNoExisting:
     @patch("agents.vendor_check.session_scope")
     @patch("agents.vendor_check.log_agent_action")
     def test_allows_when_no_existing(self, mock_log, mock_session):
-        session_mock = MagicMock()
-        session_mock.query.return_value.filter.return_value.all.return_value = []
+        session_mock = _make_session_mock([])
         mock_session.return_value.__enter__ = MagicMock(return_value=session_mock)
         mock_session.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -44,6 +55,7 @@ class TestVendorCheckWithDuplicates:
     @patch("agents.vendor_check.log_agent_action")
     def test_warns_on_high_confidence_match(self, mock_log, mock_session):
         existing_vendor = MagicMock()
+        existing_vendor.id = 1
         existing_vendor.to_dict.return_value = {
             "id": 1,
             "vendor_name": "Acme Corporation",
@@ -61,10 +73,7 @@ class TestVendorCheckWithDuplicates:
         }
         existing_vendor.status = "active"
 
-        session_mock = MagicMock()
-        query_mock = MagicMock()
-        query_mock.filter.return_value.all.return_value = [existing_vendor]
-        session_mock.query.return_value = query_mock
+        session_mock = _make_session_mock([existing_vendor])
         mock_session.return_value.__enter__ = MagicMock(return_value=session_mock)
         mock_session.return_value.__exit__ = MagicMock(return_value=False)
 

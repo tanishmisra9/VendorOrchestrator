@@ -64,3 +64,6 @@ class RunContext(BaseModel):
     quality_suggestions: list[QualitySuggestion] = Field(default_factory=list)
     confidence_levels: list[ConfidenceEntry] = Field(default_factory=list)
     llm_rationales: list[LLMRationale] = Field(default_factory=list)
+    matching_history_truncated: bool = False
+    matching_history_total: int = 0
+    confidence_levels_total: int = 0

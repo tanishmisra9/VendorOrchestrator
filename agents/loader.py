@@ -16,7 +16,8 @@ class LoaderAgent(BaseAgent):
         """Load deduplicated records into the vendor master DB.
 
         For each cluster, the most complete record becomes canonical (active);
-        others are marked as duplicates. Uses bulk inserts for performance.
+        others are marked as duplicates. All inserts happen in a single
+        transaction to prevent orphaned partial writes on failure.
         """
         self.info(f"Loading {len(data):,} records")
 
@@ -48,12 +49,12 @@ class LoaderAgent(BaseAgent):
 
         engine = get_engine()
         total = len(rows_to_insert)
-        for start in range(0, total, BATCH_SIZE):
-            batch = rows_to_insert[start:start + BATCH_SIZE]
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            for start in range(0, total, BATCH_SIZE):
+                batch = rows_to_insert[start:start + BATCH_SIZE]
                 conn.execute(VendorMaster.__table__.insert(), batch)
-            if (start + BATCH_SIZE) % 10000 == 0 or start + BATCH_SIZE >= total:
-                self.info(f"  Inserted {min(start + BATCH_SIZE, total):,}/{total:,} rows")
+                if (start + BATCH_SIZE) % 10000 == 0 or start + BATCH_SIZE >= total:
+                    self.info(f"  Inserted {min(start + BATCH_SIZE, total):,}/{total:,} rows")
 
         self.info("Writing audit summary...")
         log_agent_action(
@@ -88,13 +89,19 @@ class LoaderAgent(BaseAgent):
         return dict(clusters)
 
     def _pick_canonical(self, members: list[dict]) -> dict:
-        """Choose the record with the most non-empty fields as canonical."""
-        def completeness(rec: dict) -> int:
-            return sum(
+        """Choose the record with the most non-empty fields as canonical.
+
+        Tiebreakers: longest vendor_name, then alphabetical vendor_name
+        for fully deterministic selection.
+        """
+        def sort_key(rec: dict) -> tuple:
+            completeness = sum(
                 1 for k, v in rec.items()
                 if k not in ("cluster_id", "_index", "source")
                 and v is not None
                 and (not isinstance(v, str) or v.strip())
             )
+            name = rec.get("vendor_name", "")
+            return (completeness, len(name), name)
 
-        return max(members, key=completeness)
+        return max(members, key=sort_key)

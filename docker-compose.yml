@@ -28,9 +28,13 @@ services:
       MYSQL_USER: ${MYSQL_USER:-vendor_admin}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-changeme}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-vendor_master_db}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      STRICT_AUDIT: ${STRICT_AUDIT:-true}
     depends_on:
       mysql:
         condition: service_healthy
+    entrypoint: ["sh", "-c", "alembic upgrade head && streamlit run ui/app.py --server.port=8501 --server.address=0.0.0.0"]
     volumes:
       - ./data:/app/data
 

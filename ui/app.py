@@ -1,5 +1,6 @@
-import sys
 import os
+import re
+import sys
 import logging
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -14,9 +15,26 @@ from db.models import VendorMaster, AuditLog, AnalystOverride as OverrideModel
 from agents.vendor_check import VendorCheckAgent
 from orchestrator.graph import run_pipeline, run_pipeline_stepwise
 from utils.audit import log_analyst_override
+from utils.errors import safe_message
+from utils.matching import sanitize_like
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
+
+MAX_UPLOAD_SIZE_MB = 200
+
+REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() in ("true", "1", "yes")
+APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+
+US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC",
+}
+TAX_ID_PATTERN = re.compile(r"^\d{2}-\d{7}$")
+ZIP_PATTERN = re.compile(r"^\d{5}(-\d{4})?$")
 
 st.set_page_config(
     page_title="Vendor Master Assistant",
@@ -55,9 +73,29 @@ div[data-testid="stFileUploader"] > label { display: none !important; }
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource
-def get_shared_context() -> SharedContext:
-    return SharedContext()
+def _get_session_context() -> SharedContext:
+    """Return a per-session SharedContext stored in st.session_state."""
+    if "shared_context" not in st.session_state:
+        st.session_state["shared_context"] = SharedContext()
+    return st.session_state["shared_context"]
+
+
+def _check_auth() -> bool:
+    """Gate access behind a password if REQUIRE_AUTH is set."""
+    if not REQUIRE_AUTH:
+        return True
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.title("Vendor master assistant")
+    password = st.text_input("Enter password to continue", type="password")
+    if st.button("Login", type="primary"):
+        if password == APP_PASSWORD:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False
 
 
 def ensure_db():
@@ -65,11 +103,14 @@ def ensure_db():
         init_db()
         return True
     except Exception as e:
-        st.error(f"Database connection failed: {e}")
+        st.error(f"Database connection failed: {safe_message(e)}")
         return False
 
 
 def main():
+    if not _check_auth():
+        return
+
     st.title("Agentic vendor master assistant")
     st.caption("AI-powered vendor data management, deduplication, and enrichment")
 
@@ -115,13 +156,22 @@ def render_batch_tab(db_ok: bool):
         }
         </style>
         """, unsafe_allow_html=True)
+
+        file_size_mb = uploaded.size / (1024 * 1024)
+        if file_size_mb > MAX_UPLOAD_SIZE_MB:
+            st.error(
+                f"File too large ({file_size_mb:.1f} MB). "
+                f"Maximum allowed size is {MAX_UPLOAD_SIZE_MB} MB."
+            )
+            return
+
         try:
             if uploaded.name.endswith(".csv"):
                 df = pd.read_csv(uploaded)
             else:
                 df = pd.read_excel(uploaded)
         except Exception as e:
-            st.error(f"Failed to read file: {e}")
+            st.error(f"Failed to read file: {safe_message(e)}")
             return
 
         file_cols = set(df.columns.str.strip().str.lower())
@@ -188,7 +238,7 @@ def render_batch_tab(db_ok: bool):
 
         if st.button("Run pipeline", type="primary", disabled=not db_ok):
             records = df.fillna("").to_dict(orient="records")
-            ctx = get_shared_context()
+            ctx = _get_session_context()
 
             import time
             import random
@@ -239,7 +289,7 @@ def render_batch_tab(db_ok: bool):
             except Exception as e:
                 status_el.empty()
                 bar_el.empty()
-                st.error(f"Pipeline failed: {e}")
+                st.error(f"Pipeline failed: {safe_message(e)}")
                 return
 
             _render_bar(1.0, "#22c55e")
@@ -320,58 +370,73 @@ def render_add_vendor_tab(db_ok: bool):
     with st.form("add_vendor_form"):
         col1, col2 = st.columns(2)
         with col1:
-            vendor_name = st.text_input("Vendor Name *")
+            vendor_name = st.text_input("Vendor name *")
             address = st.text_input("Address")
             city = st.text_input("City")
         with col2:
-            state = st.text_input("State")
-            zip_code = st.text_input("ZIP Code")
+            state = st.text_input("State (2-letter code)")
+            zip_code = st.text_input("ZIP code")
             country = st.text_input("Country", value="US")
-        tax_id = st.text_input("Tax ID (EIN: XX-XXXXXXX)")
-        submitted = st.form_submit_button("Check & Submit", type="primary", disabled=not db_ok)
+        tax_id = st.text_input("Tax ID (EIN format: XX-XXXXXXX)")
+        submitted = st.form_submit_button("Check & submit", type="primary", disabled=not db_ok)
 
-    if submitted and vendor_name:
+    if submitted:
+        errors = _validate_vendor_form(vendor_name, tax_id, zip_code, state)
+        if errors:
+            for err in errors:
+                st.error(err)
+            return
+
         new_vendor = {
-            "vendor_name": vendor_name,
-            "address": address,
-            "city": city,
-            "state": state,
-            "zip": zip_code,
-            "country": country,
-            "tax_id": tax_id,
+            "vendor_name": vendor_name.strip(),
+            "address": address.strip(),
+            "city": city.strip(),
+            "state": state.strip().upper(),
+            "zip": zip_code.strip(),
+            "country": country.strip() or "US",
+            "tax_id": tax_id.strip(),
         }
 
-        ctx = get_shared_context()
-        if not hasattr(ctx, "_current_run_id") or ctx._current_run_id is None:
-            ctx.new_run()
-
+        ctx = _get_session_context()
+        ctx.new_run()
         agent = VendorCheckAgent(ctx)
 
         with st.spinner("Checking for duplicates..."):
             result = agent.run(new_vendor)
 
-        recommendation = result["recommendation"]
-        matches = result["matches"]
+        st.session_state["vendor_check_result"] = result
+        st.session_state["pending_vendor"] = new_vendor
+
+    check_result = st.session_state.get("vendor_check_result")
+    pending_vendor = st.session_state.get("pending_vendor")
+
+    if check_result and pending_vendor:
+        recommendation = check_result["recommendation"]
+        matches = check_result["matches"]
 
         if recommendation == "allow":
-            st.success(result["message"])
-            _insert_vendor(new_vendor)
+            st.success(check_result["message"])
+            _insert_vendor(pending_vendor)
+            st.session_state.pop("vendor_check_result", None)
+            st.session_state.pop("pending_vendor", None)
             st.balloons()
 
         elif recommendation == "warn":
-            st.warning(result["message"])
+            st.warning(check_result["message"])
             st.subheader("Potential duplicates")
             if matches:
                 st.dataframe(pd.DataFrame(matches), use_container_width=True)
 
             col_accept, col_override = st.columns(2)
             with col_accept:
-                if st.button("Accept as Duplicate (don't add)", key="accept_dup"):
+                if st.button("Accept as duplicate (don't add)", key="accept_dup"):
                     st.info("Vendor not added. Marked as known duplicate.")
+                    st.session_state.pop("vendor_check_result", None)
+                    st.session_state.pop("pending_vendor", None)
             with col_override:
                 reason = st.text_input("Override reason", key="override_reason")
-                if st.button("Override: Add Anyway", key="override_add"):
-                    vendor_id = _insert_vendor(new_vendor)
+                if st.button("Override: add anyway", key="override_add"):
+                    vendor_id = _insert_vendor(pending_vendor)
                     if vendor_id and matches:
                         log_analyst_override(
                             vendor_id=vendor_id,
@@ -381,9 +446,23 @@ def render_add_vendor_tab(db_ok: bool):
                             analyst_name="analyst",
                         )
                     st.success("Vendor added with analyst override.")
+                    st.session_state.pop("vendor_check_result", None)
+                    st.session_state.pop("pending_vendor", None)
 
-    elif submitted:
-        st.warning("Vendor name is required.")
+
+def _validate_vendor_form(
+    vendor_name: str, tax_id: str, zip_code: str, state: str
+) -> list[str]:
+    errors = []
+    if not vendor_name or not vendor_name.strip():
+        errors.append("Vendor name is required.")
+    if tax_id and tax_id.strip() and not TAX_ID_PATTERN.match(tax_id.strip()):
+        errors.append("Tax ID must be in EIN format: XX-XXXXXXX (e.g. 12-3456789).")
+    if zip_code and zip_code.strip() and not ZIP_PATTERN.match(zip_code.strip()):
+        errors.append("ZIP code must be 5 digits or 5+4 format (e.g. 12345 or 12345-6789).")
+    if state and state.strip() and state.strip().upper() not in US_STATES:
+        errors.append(f"State '{state.strip()}' is not a valid 2-letter US state code.")
+    return errors
 
 
 def _insert_vendor(record: dict) -> int | None:
@@ -404,7 +483,7 @@ def _insert_vendor(record: dict) -> int | None:
             session.flush()
             return vendor.id
     except Exception as e:
-        st.error(f"Failed to insert vendor: {e}")
+        st.error(f"Failed to insert vendor: {safe_message(e)}")
         return None
 
 
@@ -422,9 +501,9 @@ def render_search_tab(db_ok: bool):
 
     col1, col2 = st.columns(2)
     with col1:
-        search_name = st.text_input("Search by Vendor Name", key="search_name")
+        search_name = st.text_input("Search by vendor name", key="search_name")
     with col2:
-        search_tax = st.text_input("Search by Tax ID", key="search_tax")
+        search_tax = st.text_input("Search by tax ID", key="search_tax")
 
     show_dupes = st.toggle("Include duplicate records in results", value=False, key="show_dupes")
 
@@ -437,12 +516,12 @@ def render_search_tab(db_ok: bool):
         total_all = session.query(VendorMaster).count()
 
         if total_all == 0:
-            st.info("No vendors in the database yet. Upload a file in the Batch Pipeline tab to get started.")
+            st.info("No vendors in the database yet. Upload a file in the Batch pipeline tab to get started.")
             return
 
         col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Active Vendors", f"{total_active:,}")
-        col_m2.metric("Total Records", f"{total_all:,}")
+        col_m1.metric("Active vendors", f"{total_active:,}")
+        col_m2.metric("Total records", f"{total_all:,}")
         col_m3.metric("Duplicates", f"{total_all - total_active:,}")
 
         st.divider()
@@ -453,11 +532,13 @@ def render_search_tab(db_ok: bool):
             query = query.filter(VendorMaster.status == "active")
 
         if search_name:
+            safe_name = sanitize_like(search_name)
             query = query.filter(
-                VendorMaster.vendor_name.ilike(f"%{search_name}%")
+                VendorMaster.vendor_name.ilike(f"%{safe_name}%")
             )
         if search_tax:
-            query = query.filter(VendorMaster.tax_id.ilike(f"%{search_tax}%"))
+            safe_tax = sanitize_like(search_tax)
+            query = query.filter(VendorMaster.tax_id.ilike(f"%{safe_tax}%"))
 
         results = query.order_by(VendorMaster.vendor_name).limit(200).all()
 
@@ -541,7 +622,7 @@ def render_audit_tab(db_ok: bool):
 
     if audit_type == "Agent actions":
         agent_filter = st.selectbox(
-            "Filter by Agent",
+            "Filter by agent",
             ["All", "DataQualityAgent", "DeduplicationAgent", "LoaderAgent", "VendorCheckAgent"],
         )
 

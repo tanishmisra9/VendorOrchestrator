@@ -4,6 +4,7 @@ langchain-core
 openai
 rapidfuzz
 sqlalchemy
+alembic
 pymysql[rsa]
 cryptography
 streamlit

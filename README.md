@@ -15,10 +15,16 @@ The system distributes work across four autonomous agents coordinated via a shar
 
 - **Batch pipeline** with live progress bar and typewriter status animation
 - **Column validation** on upload with visual green/red pill indicators for matched, missing, and extra columns
-- **Blocking-based deduplication** for scalable matching (tested at 100k records) — exact tax ID matching, name-prefix blocking, and a name-similarity override for near-identical vendor names
+- **Blocking-based deduplication** for scalable matching (tested at 100k records) — exact tax ID matching, multi-strategy blocking (sorted tokens, first token, tax ID), and a name-similarity override for near-identical vendor names
 - **LLM fail-fast** — gracefully degrades if OpenAI quota is exhausted (2 consecutive failures skips remaining LLM calls)
-- **Search vendor master** with aggregate metrics, default active-vendor preview, and expandable duplicate cluster views
-- **Audit log** tracking all agent actions and analyst override decisions
+- **LLM prompt injection protection** — vendor field sanitization (truncation, control char stripping) and system-message guardrails
+- **Search vendor master** with aggregate metrics, default active-vendor preview, LIKE-injection-safe search, and expandable duplicate cluster views
+- **Audit log** tracking all agent actions and analyst override decisions, with configurable strict mode
+- **Input validation** on the Add Vendor form (EIN format tax ID, 5/9-digit ZIP, 2-letter state code)
+- **Password authentication** gate (optional, via environment variable)
+- **Alembic database migrations** for safe schema evolution
+- **Upload size limit** (200 MB default) to prevent OOM on large files
+- **Sanitized error messages** — API keys, credentials, and connection strings are stripped from UI error displays
 
 ## Quick start
 
@@ -38,6 +44,8 @@ docker compose up --build
 
 The Streamlit UI will be available at `http://localhost:8501`.
 
+On startup, Alembic runs `upgrade head` to apply any pending database migrations before the app starts.
+
 ### Run locally (development)
 
 ```bash
@@ -48,28 +56,53 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env — ensure MySQL is running locally with matching credentials
 
+# Apply database migrations
+alembic upgrade head
+
 streamlit run ui/app.py
 ```
+
+## Database migrations
+
+Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/). When you modify `db/models.py`:
+
+```bash
+# Auto-generate a migration
+alembic revision --autogenerate -m "describe your change"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback one step
+alembic downgrade -1
+```
+
+In Docker, migrations run automatically on container startup.
 
 ## Project structure
 
 ```
 agents/          Agent modules (DataQuality, Deduplication, Loader, VendorCheck)
+alembic/         Database migration scripts (Alembic)
 context/         MCP shared context layer (in-memory state per pipeline run)
 db/              MySQL schema (init.sql), SQLAlchemy models, connection factory
 orchestrator/    LangGraph StateGraph workflow with stepwise execution
 ui/              Streamlit analyst interface
-utils/           Fuzzy matching (RapidFuzz with blocking), audit logging
+utils/           Fuzzy matching, audit logging, error sanitization, LIKE escaping
 tests/           Unit tests for agents, matching, and loader
 data/            Sample vendor CSVs (100k well-formed, 50k malformed for testing)
 ```
 
 ## Usage
 
-1. **Batch pipeline** — Upload a CSV/XLSX vendor file. Column validation runs immediately, showing which expected columns are present or missing. The pipeline then runs DataQuality → Deduplication → Loader with a live progress bar.
-2. **Add vendor** — Enter a single vendor record. The VendorCheckAgent checks for duplicates before insertion, with an option to override and force-add.
+1. **Batch pipeline** — Upload a CSV/XLSX vendor file (max 200 MB). Column validation runs immediately, showing which expected columns are present or missing. The pipeline then runs DataQuality → Deduplication → Loader with a live progress bar.
+2. **Add vendor** — Enter a single vendor record with validated fields (EIN tax ID, 5-digit ZIP, 2-letter state). The VendorCheckAgent checks for duplicates before insertion, with an option to override and force-add.
 3. **Search vendors** — Browse the vendor master with aggregate metrics (active, total, duplicates). Expand any vendor to see its duplicate cluster. Toggle to include duplicate records in results.
 4. **Audit log** — Review all agent actions and analyst override decisions with filtering by agent.
+
+## Authentication
+
+Set `REQUIRE_AUTH=true` and `APP_PASSWORD=your-secret` in `.env` to enable a password gate. For production, deploy behind an OAuth2 proxy (e.g., OAuth2-proxy, Cloudflare Access).
 
 ## Sample data
 
@@ -94,3 +127,6 @@ pytest tests/ -v
 | `MYSQL_USER` | MySQL user | `vendor_admin` |
 | `MYSQL_PASSWORD` | MySQL password | `changeme` |
 | `MYSQL_DATABASE` | MySQL database name | `vendor_master_db` |
+| `REQUIRE_AUTH` | Enable password authentication gate | `false` |
+| `APP_PASSWORD` | Password for authentication gate | (empty) |
+| `STRICT_AUDIT` | Fail pipeline on audit write errors | `true` |

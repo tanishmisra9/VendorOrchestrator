@@ -1,4 +1,6 @@
+import logging
 import os
+import time
 from contextlib import contextmanager
 
 from dotenv import load_dotenv
@@ -8,9 +10,13 @@ from sqlalchemy.orm import sessionmaker, Session
 from .models import Base
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 _engine = None
 _SessionFactory = None
+
+_INIT_RETRIES = 3
+_INIT_BACKOFF_SECONDS = [2, 4, 8]
 
 
 def _build_url() -> str:
@@ -25,7 +31,14 @@ def _build_url() -> str:
 def get_engine():
     global _engine
     if _engine is None:
-        _engine = create_engine(_build_url(), pool_pre_ping=True, echo=False)
+        _engine = create_engine(
+            _build_url(),
+            pool_pre_ping=True,
+            pool_recycle=3600,
+            pool_size=10,
+            max_overflow=20,
+            echo=False,
+        )
     return _engine
 
 
@@ -51,9 +64,23 @@ def session_scope():
         session.rollback()
         raise
     finally:
+        session.rollback()
         session.close()
 
 
 def init_db():
-    """Create all tables defined in the ORM models."""
-    Base.metadata.create_all(get_engine())
+    """Create all tables defined in the ORM models, with retry logic for startup races."""
+    for attempt in range(_INIT_RETRIES):
+        try:
+            Base.metadata.create_all(get_engine())
+            return
+        except Exception:
+            if attempt < _INIT_RETRIES - 1:
+                wait = _INIT_BACKOFF_SECONDS[attempt]
+                logger.warning(
+                    "Database init attempt %d/%d failed, retrying in %ds...",
+                    attempt + 1, _INIT_RETRIES, wait,
+                )
+                time.sleep(wait)
+            else:
+                raise
