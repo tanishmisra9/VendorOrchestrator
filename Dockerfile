@@ -15,4 +15,6 @@ EXPOSE 8501
 
 HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')" || exit 1
 
-ENTRYPOINT ["sh", "-c", "alembic upgrade head && streamlit run ui/app.py --server.port=${PORT:-8501} --server.address=0.0.0.0"]
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
