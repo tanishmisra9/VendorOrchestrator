@@ -2,6 +2,8 @@
 
 A modular Agentic AI solution that manages, cleans, deduplicates, and enriches vendor data across an enterprise. Built with LangGraph orchestration, OpenAI GPT-4, and a Streamlit analyst UI.
 
+**Live demo:** [vendororchestrator-production.up.railway.app](https://vendororchestrator-production.up.railway.app)
+
 ## Architecture
 
 The system distributes work across four autonomous agents coordinated via a shared MCP (Model Context Protocol) context layer:
@@ -20,13 +22,33 @@ The system distributes work across four autonomous agents coordinated via a shar
 - **LLM prompt injection protection** — vendor field sanitization (truncation, control char stripping) and system-message guardrails
 - **Search vendor master** with aggregate metrics, default active-vendor preview, LIKE-injection-safe search, and expandable duplicate cluster views
 - **Audit log** tracking all agent actions and analyst override decisions, with configurable strict mode
-- **Input validation** on the Add Vendor form (EIN format tax ID, 5/9-digit ZIP, 2-letter state code)
+- **Input validation** on the Add Vendor form (EIN format tax ID, 5-digit ZIP, 2-letter state code)
 - **Password authentication** gate (optional, via environment variable)
 - **Alembic database migrations** for safe schema evolution
 - **Upload size limit** (200 MB default) to prevent OOM on large files
 - **Sanitized error messages** — API keys, credentials, and connection strings are stripped from UI error displays
+- **Resilient entrypoint** — retries database migrations up to 10 times on startup, handling cold-start race conditions on cloud platforms
 
-## Quick start
+## Deployment
+
+The app is deployed on [Railway](https://railway.app) with two services:
+
+- **VendorOrchestrator** — Dockerized Streamlit app built from this repo
+- **MySQL** — Railway-managed MySQL 8.0 instance
+
+Railway auto-deploys on every push to `master`. The entrypoint script waits for the database to be ready, runs Alembic migrations, then starts Streamlit on the Railway-assigned `PORT`.
+
+### Deploy your own
+
+1. Push this repo to GitHub
+2. Create a new project on [Railway](https://railway.app)
+3. Add a **MySQL** database service
+4. Add a new service from your GitHub repo
+5. Set environment variables on the app service (copy `MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD`, `MYSQLDATABASE` from the MySQL service into `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`)
+6. Add your `OPENAI_API_KEY`
+7. Under **Settings > Networking**, generate a domain and set the port to match Railway's `PORT` (typically `8080`)
+
+## Quick start (local)
 
 ### Prerequisites
 
@@ -44,7 +66,7 @@ docker compose up --build
 
 The Streamlit UI will be available at `http://localhost:8501`.
 
-On startup, Alembic runs `upgrade head` to apply any pending database migrations before the app starts.
+On startup, the entrypoint script retries Alembic migrations until the database is ready, then starts the app.
 
 ### Run locally (development)
 
@@ -77,7 +99,7 @@ alembic upgrade head
 alembic downgrade -1
 ```
 
-In Docker, migrations run automatically on container startup.
+In Docker and Railway, migrations run automatically on container startup via `entrypoint.sh`.
 
 ## Project structure
 
@@ -85,12 +107,13 @@ In Docker, migrations run automatically on container startup.
 agents/          Agent modules (DataQuality, Deduplication, Loader, VendorCheck)
 alembic/         Database migration scripts (Alembic)
 context/         MCP shared context layer (in-memory state per pipeline run)
-db/              MySQL schema (init.sql), SQLAlchemy models, connection factory
+db/              SQLAlchemy models and connection factory with retry logic
 orchestrator/    LangGraph StateGraph workflow with stepwise execution
-ui/              Streamlit analyst interface
+ui/              Streamlit analyst interface with custom CSS theming
 utils/           Fuzzy matching, audit logging, error sanitization, LIKE escaping
-tests/           Unit tests for agents, matching, and loader
+tests/           Unit tests for agents, matching, loader, and hardening
 data/            Sample vendor CSVs (100k well-formed, 50k malformed for testing)
+entrypoint.sh    Startup script with database readiness retry loop
 ```
 
 ## Usage
@@ -117,6 +140,8 @@ Two sample files are included in `data/` for testing:
 pytest tests/ -v
 ```
 
+51 tests covering agents, matching logic, loader behavior, error sanitization, LIKE escaping, deterministic canonical selection, and prompt injection sanitization.
+
 ## Environment variables
 
 | Variable | Description | Default |
@@ -130,3 +155,16 @@ pytest tests/ -v
 | `REQUIRE_AUTH` | Enable password authentication gate | `false` |
 | `APP_PASSWORD` | Password for authentication gate | (empty) |
 | `STRICT_AUDIT` | Fail pipeline on audit write errors | `true` |
+
+## Tech stack
+
+- **Python 3.11** — runtime
+- **LangGraph** — agent orchestration
+- **OpenAI GPT-4** — LLM for ambiguous deduplication and vendor checks
+- **Streamlit** — analyst UI
+- **MySQL 8.0** — vendor master database
+- **SQLAlchemy** — ORM
+- **Alembic** — database migrations
+- **RapidFuzz** — fuzzy string matching
+- **Docker** — containerization
+- **Railway** — cloud deployment
